@@ -2639,6 +2639,10 @@
         .bot-ai-status.demo .bot-ai-status-dot {
             background: #fbbf24;
         }
+        .bot-ai-status.limited .bot-ai-status-dot {
+            background: #f59e0b;
+            box-shadow: 0 0 0 3px rgba(245,158,11,.16);
+        }
         .bot-suggestion-chip {
             border: 1px solid #dbeafe;
             background: #eff6ff;
@@ -7745,6 +7749,7 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
         let botRequestInFlight = false;
         let botAiAvailable = null; // null=belum dicek, true=Gemini aktif, false=benar-benar demo
         let botLastHealthCheck = 0;
+        let botQuotaLimited = false; // true jika Gemini menolak request karena quota/rate limit
 
         function getBotPageContext() {
             let activeTab = 'beranda';
@@ -7765,8 +7770,10 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             const el = document.getElementById('bot-ai-status');
             const text = document.getElementById('bot-ai-status-text');
             if (!el || !text) return;
-            el.classList.remove('online', 'demo');
-            el.classList.add(mode === 'online' ? 'online' : 'demo');
+            el.classList.remove('online', 'demo', 'limited');
+            if (mode === 'online') el.classList.add('online');
+            else if (mode === 'limited') el.classList.add('limited');
+            else el.classList.add('demo');
             text.textContent = label;
         }
 
@@ -7790,7 +7797,11 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
 
                 if (data.ai === true) {
                     botAiAvailable = true;
-                    setBotAiStatus('online', 'Gemini Online');
+                    if (botQuotaLimited) {
+                        setBotAiStatus('limited', 'Kuota AI Penuh');
+                    } else {
+                        setBotAiStatus('online', 'Gemini Online');
+                    }
                 } else {
                     botAiAvailable = false;
                     setBotAiStatus('demo', 'Mode Demo');
@@ -7958,16 +7969,30 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
                 if (botConversation.length > 12) botConversation.splice(0, botConversation.length - 12);
 
                 botAiAvailable = true;
+                botQuotaLimited = false;
                 botLastHealthCheck = Date.now();
                 setBotAiStatus('online', 'Gemini Online');
             } catch (error) {
                 removeBotTyping();
 
-                // Jangan mengubah AI yang sudah terbukti online menjadi Demo hanya karena satu request gagal.
-                if (botAiAvailable === true) {
+                const errorText = String(error?.message || '').toLowerCase();
+                const isQuotaError = error?.status === 429 ||
+                    /quota|exceeded|resource_exhausted|rate limit|too many requests/.test(errorText);
+
+                if (isQuotaError) {
+                    // Backend dan Gemini tetap terhubung, tetapi batas pemakaian API sedang tercapai.
+                    botAiAvailable = true;
+                    botQuotaLimited = true;
+                    setBotAiStatus('limited', 'Kuota AI Penuh');
                     appendChatBubble(
                         'assistant',
-                        'Koneksi ke Gemini sempat terganggu, tetapi AI masih aktif. Silakan kirim ulang pertanyaan ini beberapa detik lagi.'
+                        'Bot Nusantara sedang mencapai batas penggunaan AI. Silakan coba kembali beberapa saat lagi. Koneksi ke Gemini tetap aktif, tetapi permintaan baru sementara dibatasi oleh kuota.'
+                    );
+                } else if (botAiAvailable === true) {
+                    // Gangguan jaringan/server sesaat: jangan turunkan status menjadi Mode Demo.
+                    appendChatBubble(
+                        'assistant',
+                        'Koneksi ke Gemini sedang terganggu sementara. Silakan kirim ulang pertanyaan ini beberapa detik lagi.'
                     );
                     setBotAiStatus('online', 'Gemini Online');
                     setTimeout(() => checkBotAiStatus({ force: true }), 1800);
