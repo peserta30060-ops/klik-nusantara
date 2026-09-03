@@ -7743,6 +7743,8 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
 
         const botConversation = [];
         let botRequestInFlight = false;
+        let botAiAvailable = null; // null=belum dicek, true=Gemini aktif, false=benar-benar demo
+        let botLastHealthCheck = 0;
 
         function getBotPageContext() {
             let activeTab = 'beranda';
@@ -7768,15 +7770,42 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             text.textContent = label;
         }
 
-        async function checkBotAiStatus() {
+        async function checkBotAiStatus({ force = false } = {}) {
+            const now = Date.now();
+            if (!force && botLastHealthCheck && (now - botLastHealthCheck) < 15000) return botAiAvailable;
+            botLastHealthCheck = now;
+
             try {
-                const res = await fetch(`${BOT_API_BASE}/api/health`, { headers: { 'Accept': 'application/json' } });
-                if (!res.ok) throw new Error('offline');
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 8000);
+                const res = await fetch(`${BOT_API_BASE}/api/health`, {
+                    headers: { 'Accept': 'application/json' },
+                    cache: 'no-store',
+                    signal: controller.signal
+                });
+                clearTimeout(timeout);
+
+                if (!res.ok) throw new Error(`health ${res.status}`);
                 const data = await res.json();
-                if (data.ai === true) setBotAiStatus('online', 'Gemini Online');
-                else setBotAiStatus('demo', 'Mode Demo');
-            } catch (_) {
-                setBotAiStatus('demo', 'Mode Demo');
+
+                if (data.ai === true) {
+                    botAiAvailable = true;
+                    setBotAiStatus('online', 'Gemini Online');
+                } else {
+                    botAiAvailable = false;
+                    setBotAiStatus('demo', 'Mode Demo');
+                }
+                return botAiAvailable;
+            } catch (error) {
+                // Jangan langsung turun ke Mode Demo hanya karena koneksi sesaat gagal.
+                if (botAiAvailable === true) {
+                    setBotAiStatus('online', 'Gemini Online');
+                } else if (botAiAvailable === false) {
+                    setBotAiStatus('demo', 'Mode Demo');
+                } else {
+                    setBotAiStatus('online', 'Menghubungkan Gemini…');
+                }
+                return botAiAvailable;
             }
         }
 
@@ -7865,6 +7894,41 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             return 'Bot Nusantara sedang berjalan dalam Mode Demo. Untuk percakapan AI penuh, pastikan layanan Bot Nusantara sedang aktif. API key tetap disimpan aman di backend, bukan di file HTML.';
         }
 
+        async function requestGeminiChat(payload, attempt = 0) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 45000);
+            try {
+                const res = await fetch(`${BOT_API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    cache: 'no-store',
+                    signal: controller.signal,
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const err = new Error(data.error || `Gemini gagal (${res.status})`);
+                    err.status = res.status;
+                    throw err;
+                }
+                return data;
+            } catch (error) {
+                // Satu retry untuk gangguan sementara, timeout, atau error server.
+                const retryable = attempt === 0 && (!error.status || error.status >= 500 || error.name === 'AbortError');
+                if (retryable) {
+                    await new Promise(resolve => setTimeout(resolve, 900));
+                    return requestGeminiChat(payload, 1);
+                }
+                throw error;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
         async function sendChatMessage() {
             if (botRequestInFlight) return;
             const inputEl = document.getElementById('chat-input');
@@ -7878,40 +7942,55 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
 
             botRequestInFlight = true;
             inputEl.disabled = true;
-            const typing = showBotTyping();
+            showBotTyping();
 
             try {
-                const res = await fetch(`${BOT_API_BASE}/api/chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message,
-                        history: botConversation.slice(0, -1),
-                        context: getBotPageContext()
-                    })
+                const data = await requestGeminiChat({
+                    message,
+                    history: botConversation.slice(0, -1),
+                    context: getBotPageContext()
                 });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error || 'server Gemini tidak tersedia');
-                }
-                const data = await res.json();
+
                 const reply = (data.reply || '').trim() || 'Maaf, saya belum mendapatkan jawaban.';
                 removeBotTyping();
                 appendChatBubble('assistant', reply);
                 botConversation.push({ role: 'assistant', content: reply });
                 if (botConversation.length > 12) botConversation.splice(0, botConversation.length - 12);
+
+                botAiAvailable = true;
+                botLastHealthCheck = Date.now();
                 setBotAiStatus('online', 'Gemini Online');
             } catch (error) {
                 removeBotTyping();
-                const reply = localBotFallback(message);
-                appendChatBubble('assistant', reply);
-                setBotAiStatus('demo', 'Mode Demo');
+
+                // Jangan mengubah AI yang sudah terbukti online menjadi Demo hanya karena satu request gagal.
+                if (botAiAvailable === true) {
+                    appendChatBubble(
+                        'assistant',
+                        'Koneksi ke Gemini sempat terganggu, tetapi AI masih aktif. Silakan kirim ulang pertanyaan ini beberapa detik lagi.'
+                    );
+                    setBotAiStatus('online', 'Gemini Online');
+                    setTimeout(() => checkBotAiStatus({ force: true }), 1800);
+                } else {
+                    const health = await checkBotAiStatus({ force: true });
+                    if (health === false) {
+                        appendChatBubble('assistant', localBotFallback(message));
+                        setBotAiStatus('demo', 'Mode Demo');
+                    } else {
+                        appendChatBubble(
+                            'assistant',
+                            'Koneksi AI sedang tidak stabil. Silakan coba kirim ulang pertanyaannya.'
+                        );
+                    }
+                }
+                console.warn('Bot Nusantara AI request:', error);
             } finally {
                 botRequestInFlight = false;
                 inputEl.disabled = false;
                 inputEl.focus();
             }
         }
+
 
     
         if (document.readyState === 'loading') {
