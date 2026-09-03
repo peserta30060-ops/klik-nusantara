@@ -7905,40 +7905,35 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             return 'Bot Nusantara sedang berjalan dalam Mode Demo. Untuk percakapan AI penuh, pastikan layanan Bot Nusantara sedang aktif. API key tetap disimpan aman di backend, bukan di file HTML.';
         }
 
-        async function requestGeminiChat(payload, attempt = 0) {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 45000);
-            try {
-                const res = await fetch(`${BOT_API_BASE}/api/chat`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    cache: 'no-store',
-                    signal: controller.signal,
-                    body: JSON.stringify(payload)
-                });
+async function requestGeminiChat(payload) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    const err = new Error(data.error || `Gemini gagal (${res.status})`);
-                    err.status = res.status;
-                    throw err;
-                }
-                return data;
-            } catch (error) {
-                // Satu retry untuk gangguan sementara, timeout, atau error server.
-                const retryable = attempt === 0 && (!error.status || error.status >= 500 || error.name === 'AbortError');
-                if (retryable) {
-                    await new Promise(resolve => setTimeout(resolve, 900));
-                    return requestGeminiChat(payload, 1);
-                }
-                throw error;
-            } finally {
-                clearTimeout(timeout);
-            }
+    try {
+        const res = await fetch(`${BOT_API_BASE}/api/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            cache: 'no-store',
+            signal: controller.signal,
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            const err = new Error(data.error || `Gemini gagal (${res.status})`);
+            err.status = res.status;
+            throw err;
         }
+
+        return data;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
         async function sendChatMessage() {
             if (botRequestInFlight) return;
