@@ -1,0 +1,13 @@
+{
+  "name": "klik-nusantara-gemini",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Klik Nusantara dengan Bot Nusantara terintegrasi Gemini AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
