@@ -7739,6 +7739,8 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             setTimeout(() => { toastEl.classList.add('opacity-0'); }, 3000);
         }
 
+        const BOT_API_BASE = 'https://klik-nusantara-ai.peserta-30060.workers.dev';
+
         const botConversation = [];
         let botRequestInFlight = false;
 
@@ -7768,7 +7770,7 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
 
         async function checkBotAiStatus() {
             try {
-                const res = await fetch('/api/health', { headers: { 'Accept': 'application/json' } });
+                const res = await fetch(`${BOT_API_BASE}/api/health`, { headers: { 'Accept': 'application/json' } });
                 if (!res.ok) throw new Error('offline');
                 const data = await res.json();
                 if (data.ai === true) setBotAiStatus('online', 'Gemini Online');
@@ -7860,7 +7862,7 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             if (lower.includes('quiz') || lower.includes('kuis')) {
                 return 'Buka menu Quiz untuk mencoba Quiz Cepat atau Mencocokkan Nusantara. Mode AI akan dapat membantu memberi penjelasan setelah server Gemini diaktifkan.';
             }
-            return 'Bot Nusantara sedang berjalan dalam Mode Demo. Untuk percakapan AI penuh, buka website melalui server.js dan tambahkan GEMINI_API_KEY pada server—jangan menaruh API key di file HTML.';
+            return 'Bot Nusantara sedang berjalan dalam Mode Demo. Untuk percakapan AI penuh, pastikan layanan Bot Nusantara sedang aktif. API key tetap disimpan aman di backend, bukan di file HTML.';
         }
 
         async function sendChatMessage() {
@@ -7879,7 +7881,7 @@ Tanyakan materi IPS, budaya, geografi, masyarakat, atau provinsi yang sedang kam
             const typing = showBotTyping();
 
             try {
-                const res = await fetch('/api/chat', {
+                const res = await fetch(`${BOT_API_BASE}/api/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
